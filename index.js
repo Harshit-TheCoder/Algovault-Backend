@@ -9,7 +9,7 @@ import Bookmark from "./db/Bookmark.js";
 import Notes from "./db/Notes.js";
 import nodemailer from "nodemailer";
 const app = express();
-const port = 5000;
+const port = process.env.PORT || 5000;
 
 app.use(express.json());
 app.use(cors({
