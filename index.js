@@ -10,6 +10,7 @@ import Notes from "./db/Notes.js";
 import nodemailer from "nodemailer";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import Leaderboard from "./db/Leaderboard.js";
+import Links from "./db/Links.js";
 
 const app = express();
 
@@ -50,6 +51,93 @@ const transporter = nodemailer.createTransport({
     }
 });
 
+
+app.post('/saveLinks', async (req, res) =>{
+    const { name, userId , leetcode, codeforces, codechef, github, linkedin } = req.body;
+    let link = new Links({
+        name: name, userId: userId , leetcode: leetcode, codeforces: codeforces, codechef: codechef, github: github, linkedin: linkedin
+    });
+
+    let result = await link.save();
+    if(result){
+        res.send({"Message" :"Success"});
+    }
+    else{
+        res.send({"Message": "Error"});
+    }
+});
+
+app.post('/getProfileCard', async (req, res) => {
+    try {
+        const { name, userId } = req.body;
+
+        let data = {
+            userId,
+            name,
+            email: "",
+            points: "",
+            easyTests: "",
+            mediumTests: "",
+            hardTests: "",
+            leetcode: "",
+            codeforces: "",
+            codechef: "",
+            github: "",
+            linkedin: ""
+        };
+
+        // Fetch links
+        const links = await Links.findOne({ userId: userId });
+        if (links) {
+            console.log(links);
+            data.leetcode = links.leetcode || "";
+            data.github = links.github || "";
+            data.codeforces = links.codeforces || "";
+            data.codechef = links.codechef || "";
+            data.linkedin = links.linkedin || "";
+        }
+
+        // Fetch leaderboard details
+        const leaderboard = await Leaderboard.findOne({ userId: userId });
+        if (leaderboard) {
+            console.log(leaderboard);
+            data.email = leaderboard.email || 0;
+            data.points = leaderboard.points/6 || 0;
+            data.easyTests = leaderboard.easyTests/6 || 0;
+            data.mediumTests = leaderboard.mediumTests/6 || 0;
+            data.hardTests = leaderboard.hardTests/6 || 0;
+        }
+
+        res.json({ success: true, profile: data });
+
+    } catch (error) {
+        console.error("Error fetching profile card:", error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+});
+
+app.get("/getLinks/:userId", async (req, res) => {
+    try {
+        const user = await Links.findOne({ userId: req.params.userId });
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
+        let r = {
+            leetcode : user.leetcode, 
+            codeforces: user.codeforces,
+            codechef: user.codechef,
+            github: user.github,
+            linkedin: user.linkedin
+        }
+        console.log(r);
+        res.json({ success: true, links: r });
+    } catch (error) {
+        console.error("Error fetching links:", error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+});
 
 app.post("/chatbot", async (req, res) => {
     try {
