@@ -443,6 +443,29 @@ app.post("/google_login", async (req, res)=>{
 });
 
 
+app.get("/search_program/:key", async (req, res) => {
+    try {
+        let key = req.params.key;
+        let result = await Program.find({
+            $or: [
+                { programName: { $regex: key, $options: "i" } }, // Search by program name
+                { programQuestion: { $regex: key, $options: "i" } }, // Search by question
+                { programCategory: { $regex: key, $options: "i" } }, // Search by category
+                { programLanguage: { $regex: key, $options: "i" } } // Search by language
+            ]
+        });
+
+        if (result.length > 0) {
+            res.json(result);
+        } else {
+            res.json({ message: "No programs found" });
+        }
+    } catch (error) {
+        console.error("Error searching programs:", error);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
 app.post("/program_upload", async (req, res)=>{
     let result = req.body;
     let program = Program(result);
