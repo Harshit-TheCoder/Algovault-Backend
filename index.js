@@ -1,4 +1,3 @@
-
 import express from "express";
 import env from "dotenv";
 import cors from "cors";
@@ -6,10 +5,14 @@ import "./db/config.js";
 import User from "./db/User.js";
 import Program from "./db/Program.js";
 import Bookmark from "./db/Bookmark.js";
+import DSAQuestions from "./db/DSAQuestions.js";
 import Notes from "./db/Notes.js";
 import nodemailer from "nodemailer";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import Leaderboard from "./db/Leaderboard.js";
+
 const app = express();
-const port = process.env.PORT || 5000;
+
 
 app.use(express.json());
 app.use(cors({
@@ -17,6 +20,25 @@ app.use(cors({
 }));
 env.config();
 
+
+const port = process.env.PORT || 5000;
+
+const apiKey = process.env.GOOGLE_API_KEY;
+
+
+const genAI = new GoogleGenerativeAI(apiKey);
+
+let difficulty_distribution = {
+    "Easy": {"Easy": 0.7, "Medium": 0.2, "Hard": 0.1},
+    "Medium": {"Easy": 0.2, "Medium": 0.7, "Hard": 0.1},
+    "Hard": {"Easy": 0.1, "Medium": 0.2, "Hard": 0.7},
+}
+let questions_per_duration = {
+    45: 5,
+    60: 6, 
+    120: 12,
+    180: 16
+}
 
 const transporter = nodemailer.createTransport({
     service: "gmail",
@@ -27,6 +49,250 @@ const transporter = nodemailer.createTransport({
       pass: "eijvradtugncebyv"        // your email password or app password
     }
 });
+
+
+app.post("/chatbot", async (req, res) => {
+    try {
+        const { question } = req.body;
+        
+        if (!question) {
+          return res.status(400).json({ error: "Question is required" });
+        }
+    
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const result = await model.generateContent(question);
+        const response = result.response.text();
+    
+        res.json({ answer: response });
+    } catch (error) {
+        console.error("Error:", error);
+        res.status(500).json({ error: "Failed to get AI response" });
+    }
+});
+
+app.post("/analyze_answers", async (req, res) => {
+    try {
+        const { questions, name, email, userId, duration, difficulty } = req.body;
+        console.log(questions, name, email, userId, duration, difficulty);
+
+        if (!questions || questions.length === 0) {
+            return res.status(400).json({ error: "No questions provided" });
+        }
+
+        let responses = [];
+        let unattempted_questions = 0;
+        let attempted_questions = 0;
+        for (let q of questions) {
+            let prompt = "";
+            console.log(q.userCode);
+            if (q.userCode === "Unattempted") {
+                unattempted_questions++;
+                prompt = `
+                The following question was **not attempted** by the student.
+                - Question: ${q.question}
+                - Description: ${q.description}
+
+                Provide a brief explanation of what the student missed and why it is important and provide brute, better and optimal solution with time and space complexity for each.
+                `;
+            } else {
+                attempted_questions++;
+                prompt = `
+                Analyze the following student's code for correctness and efficiency.
+                - Question: ${q.question}
+                - Description: ${q.description}
+                - Student's Code:
+                ${q.userCode}
+                
+                Provide structured feedback on:
+                1. **Correctness** (Does it solve the problem?)
+                2. **Efficiency** (Time Complexity)
+                3. **Code Quality** (Readability & Best Practices)
+                4. **Suggested Improvements**
+                5. **Optimal Code**
+
+                
+                `;
+            }
+
+            let total_questions = attempted_questions + unattempted_questions;
+            let percentage = (attempted_questions / total_questions) * 100;
+            let path1 = "", path2 = "", path3 = "";
+
+            if(percentage >= 90.0){
+                path1 = "D:/W/code_solution_website/backend/images/CodeOfOlympus/Gold.png";
+                path2 = "D:/W/code_solution_website/backend/images/ShonenCoders/Gold.png";
+                path3 = "D:/W/code_solution_website/backend/images/WizardingCoders/Gold.png";
+            }
+            else if(percentage >= 80.0){
+                path1 = "D:/W/code_solution_website/backend/images/CodeOfOlympus/Silver.png";
+                path2 = "D:/W/code_solution_website/backend/images/ShonenCoders/Silver.png";
+                path3 = "D:/W/code_solution_website/backend/images/WizardingCoders/Silver.png";
+            }
+            else if(percentage >= 70.0){
+                path1 = "D:/W/code_solution_website/backend/images/CodeOfOlympus/Bronze.png";
+                path2 = "D:/W/code_solution_website/backend/images/ShonenCoders/Bronze.png";
+                path3 = "D:/W/code_solution_website/backend/images/WizardingCoders/Bronze.png";
+            }
+
+            if(percentage >= 70){
+     
+                let subject = "🚀 TechTrek Mock Test Score Report - Your Performance Insights!"
+                let body = `
+                <p>Dear <strong>${name}</strong>,</p>
+                <p>Congratulations on completing your TechTrek mock DSA test! 🎉</p>
+            
+                <h3>📌 Test Details:</h3>
+                <ul>
+                    <li><strong>Duration:</strong> ${duration} minutes</li>
+                    <li><strong>Difficulty Level:</strong> ${difficulty}</li>
+                    <li><strong>Exam Format:</strong> Coding Exam</li>
+                </ul>
+            
+                <h3>📊 Your Performance:</h3>
+                <ul>
+                    <li><strong>Total Questions:</strong> ${total_questions}</li>
+                    <li>🟢 <strong>Attempted Questions:</strong> ${attempted_questions}</li>
+                    <li>❌ <strong>Unattempted Questions:</strong> ${unattempted_questions}</li>
+                    <li>🏆 <strong>Percentage:</strong> ${percentage.toFixed(2)}%</li>
+                </ul>
+            
+                <p>Your dedication to improving your DSA skills is commendable! Keep practicing and sharpening your coding expertise. 🚀</p>
+            
+                <p><strong>Happy Coding!<br>Team TechTrek</strong></p>
+                <p>For feedback, contact <a href="mailto:techtrek.feedback@gmail.com">techtrek.feedback@gmail.com</a></p>
+            `;
+
+                let transporter = nodemailer.createTransport({
+                    service: "gmail",
+                    auth: {
+                        user: "techtrek.results@gmail.com",
+                        pass: "norp agtw jzep yhej",
+                    },
+                });
+                
+                let mailOptions = {
+                    from: "techtrek.results@gmail.com",
+                    to: email,
+                    subject: subject,
+                    html: body,
+                    attachments: [
+                        {
+                            path: path1,
+                        },
+                        {
+                            path: path2,
+                        },
+                        {
+                            path: path3,
+                        },
+                    ],
+                };
+                
+                transporter.sendMail(mailOptions, (error, info) => {
+                    if (error) {
+                        console.log("Error:", error);
+                    } else {
+                        console.log("Email sent: " + info.response);
+                    }
+                });
+            }
+
+            let user = await Leaderboard.findOne({userId: userId});
+
+            let points = 0;
+            if (difficulty === "Easy") {
+                points = percentage >= 90 ? 90 : percentage >= 80 ? 80 : percentage >= 70 ? 70 : 40;
+            } else if (difficulty === "Medium") {
+                points = percentage >= 90 ? 110 : percentage >= 80 ? 100 : percentage >= 70 ? 90 : 50;
+            } else { // Hard
+                points = percentage >= 90 ? 130 : percentage >= 80 ? 120 : percentage >= 70 ? 110 : 60;
+            }
+            
+            if (user) {
+                let updateFields = {
+                    $set: { points: user.points + points },
+                    $inc: {}
+                };
+        
+                if (difficulty === "Easy") updateFields.$inc["easyTests"] = 1;
+                else if (difficulty === "Medium") updateFields.$inc["mediumTests"] = 1;
+                else updateFields.$inc["hardTests"] = 1;
+        
+                console.log("Before Update:", user);
+                let result = await Leaderboard.updateOne({ userId: userId }, updateFields);
+                console.log("After Update:", result);
+            } else {
+                let newUser = new Leaderboard({
+                    name: name,
+                    email: email,
+                    userId: userId,
+                    points: points,
+                    easyTests: difficulty === "Easy" ? 1 : 0,
+                    mediumTests: difficulty === "Medium" ? 1 : 0,
+                    hardTests: difficulty === "Hard" ? 1 : 0
+                });
+        
+                console.log("Creating new user:", newUser);
+                let result = await newUser.save();
+                console.log("New user saved:", result);
+            }
+                    
+
+            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+            const result = await model.generateContent(prompt);
+            const report = result.response.text();
+
+            responses.push({
+                question: q.question,
+                attempted: q.userCode !== "Unattempted",  // Flag for attempted status
+                feedback: report,
+            });
+
+
+        }
+
+        res.json({ success: true, report: responses });
+
+    } catch (error) {
+        console.error("Error analyzing answers:", error);
+        res.status(500).json({ error: "Failed to analyze answers" });
+    }
+});
+
+app.get('/leaderboard' , async (req, res) => {
+    try {
+        // Fetch all leaderboard data
+        let data = await Leaderboard.find({});
+
+        // Normalize the data (divide by 6)
+        data = data.map(user => ({
+            ...user._doc, 
+            points: Math.floor(user.points / 6),
+            easyTests: Math.floor(user.easyTests / 6),
+            mediumTests: Math.floor(user.mediumTests / 6),
+            hardTests: Math.floor(user.hardTests / 6),
+            totalTests: Math.floor((user.easyTests + user.mediumTests + user.hardTests) / 6)
+        }));
+
+        // Sorting based on:
+        // 1. Points (descending)
+        // 2. Hard tests > Medium tests > Easy tests
+        // 3. Total tests (descending)
+        data.sort((a, b) => {
+            if (b.points !== a.points) return b.points - a.points;  // Sort by points
+            if (b.hardTests !== a.hardTests) return b.hardTests - a.hardTests; // Sort by hard tests
+            if (b.mediumTests !== a.mediumTests) return b.mediumTests - a.mediumTests; // Sort by medium tests
+            if (b.easyTests !== a.easyTests) return b.easyTests - a.easyTests; // Sort by easy tests
+            return b.totalTests - a.totalTests; // Sort by total tests
+        });
+
+        res.status(200).json(data);
+    } catch (error) {
+        console.error("Error fetching leaderboard:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+});
+
 
 app.post("/send-email", (req, res) => {
     const {name, email, otp} = req.body;
@@ -146,27 +412,107 @@ app.get("/program/:id", async (req, res)=>{
     
 });
 
-app.put("/update_program/:id", async (req, res)=>{
-    let result = await Program.updateOne(
-        {_id: req.params.id},
-        {
-            $set : req.body
-        }
-    )
-    res.send(result);
+const selectQuestions = async (Difficulty, numQuestions) => {
+    try {
+        console.log(Difficulty);
+        console.log(typeof Difficulty);
+        // console.log(await DSAQuestions.find({}, { Difficulty: 1, _id: 0 }));
+
+        // const availableQuestions = await DSAQuestions.countDocuments({ "Difficulty": Difficulty });
+
+        // if (availableQuestions === 0) {
+        //     console.warn(`No questions found for difficulty: ${Difficulty}`);
+        //     return [];
+        // }
+
+        // const sampleSize = Math.min(numQuestions, availableQuestions); // Avoid exceeding available questions
+
+        return await DSAQuestions.aggregate([
+            { $match: { "Difficulty": Difficulty } },
+            { $sample: { "size": numQuestions } }
+        ]);
+    } catch (error) {
+        console.error("Error fetching questions:", error);
+        return [];
+    }
+};
+
+app.get("/get_questions", async(req, res) => {
+    let Questions = await DSAQuestions.find({});
+    return Questions;
 });
 
+app.post("/add_questions", async (req, res) => {
+    try {
+        let data = req.body; // Expecting an array of questions
 
-app.get("/search_program/:key", async (req, res)=>{
-    let result = await Program.find({
-        "$or":[
-            {programName:{$regex:req.params.key}},
-            {programQuestion:{$regex:req.params.key}},
-            {programCategory:{$regex:req.params.key}},
-            {programLanguage:{$regex:req.params.key}},
-        ]
-    });
-    res.send(result);
+        if (!Array.isArray(data) || data.length === 0) {
+            return res.status(400).json({ message: "Invalid input. Expected a non-empty array of questions." });
+        }
+
+        // Use insertMany to save multiple documents at once
+        let result = await DSAQuestions.insertMany(data);
+
+        res.status(201).json({ message: "Questions added successfully", data: result });
+    } catch (error) {
+        console.error("Error saving questions:", error);
+        res.status(500).json({ message: "Internal Server Error", error: error.message });
+    }
+});
+
+app.post("/sortQuestions", async (req, res) => {
+    let { Duration, Difficulty } = req.body;
+
+    console.log("Received Duration:", Duration);
+    console.log("Received Difficulty:", Difficulty);
+
+    if (!questions_per_duration[Duration]) {
+        return res.status(400).json({ error: `Invalid duration: ${Duration}` });
+    }
+    if (!difficulty_distribution[Difficulty]) {
+        return res.status(400).json({ error: `Invalid difficulty: ${Difficulty}` });
+    }
+
+    let test_details_data = {
+        "Duration": Duration,
+        "Difficulty": Difficulty,
+        "Number of Questions": 0,
+        "Number of Easy Questions": 0,
+        "Easy Question Ids": [],
+        "Number of Medium Questions": 0,
+        "Medium Question Ids": [],
+        "Number of Hard Questions": 0,
+        "Hard Question Ids": [],
+    };
+
+    let number_of_questions = questions_per_duration[Duration];
+    console.log(number_of_questions);
+    let easy_share = difficulty_distribution[Difficulty]["Easy"];
+    let medium_share = difficulty_distribution[Difficulty]["Medium"];
+    let hard_share = difficulty_distribution[Difficulty]["Hard"];
+
+    test_details_data["Number of Easy Questions"] = Math.round(number_of_questions * easy_share);
+    test_details_data["Number of Medium Questions"] = Math.round(number_of_questions * medium_share);
+    test_details_data["Number of Hard Questions"] = Math.round(number_of_questions * hard_share);
+    test_details_data["Number of Questions"] =
+        test_details_data["Number of Easy Questions"] +
+        test_details_data["Number of Medium Questions"] +
+        test_details_data["Number of Hard Questions"];
+
+    console.log("Easy", test_details_data["Number of Easy Questions"]);
+    console.log("Medium", test_details_data["Number of Medium Questions"]);
+    console.log("Hard", test_details_data["Number of Hard Questions"]);
+    const easyQuestions = await selectQuestions("Easy", test_details_data["Number of Easy Questions"]);
+    const mediumQuestions = await selectQuestions("Medium", test_details_data["Number of Medium Questions"]);
+    const hardQuestions = await selectQuestions("Hard", test_details_data["Number of Hard Questions"]);
+
+    test_details_data["Easy Question Ids"] = easyQuestions.map((q) => q._id);
+    test_details_data["Medium Question Ids"] = mediumQuestions.map((q) => q._id);
+    test_details_data["Hard Question Ids"] = hardQuestions.map((q) => q._id);
+
+    let questionArray = [...easyQuestions, ...mediumQuestions, ...hardQuestions];
+
+    res.json(questionArray);
 });
 
 app.post("/bookmark_question", async (req, res)=>{
