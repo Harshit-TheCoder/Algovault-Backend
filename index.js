@@ -508,6 +508,29 @@ app.get("/vault/:id",async (req, res)=>{
     // res.send("Success");
 });
 
+
+app.put('/update_program/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { programName, programCategory, programLanguage, code } = req.body;
+        
+        const updatedProgram = await Program.findByIdAndUpdate(id, 
+            { programName, programCategory, programLanguage, code }, 
+            { new: true }
+        );
+
+        if (!updatedProgram) {
+            return res.status(404).json({ message: "Program not found" });
+        }
+
+        res.json(updatedProgram);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
+
 app.delete("/delete_program/:id", async (req, res)=>{
     const result = await Program.deleteOne({_id: req.params.id});
     res.send(result);
